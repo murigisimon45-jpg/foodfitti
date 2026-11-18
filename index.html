@@ -1,0 +1,74 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Foodfitti Savoury Chapati — Murigi-inc</title>
+<style>
+:root{--navy:#0f2a5c;--white:#fff;--bg:#f4f6fb;--card:#fff;--text:#111}
+body.dark{--bg:#0f1420;--card:#1a2236;--text:#fff}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui;background:var(--bg);color:var(--text)}
+header{background:var(--navy);color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:10}
+header b{font-size:20px}header span{font-size:12px;opacity:.8}
+button{background:var(--navy);color:#fff;border:0;padding:12px 16px;border-radius:10px;font-weight:700;cursor:pointer;width:100%}
+button:disabled{opacity:.5}.wrap{max-width:560px;margin:0 auto;padding:16px}.card{background:var(--card);border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 2px 10px rgba(0,0,0,.08)}
+input,select,textarea{width:100%;padding:11px;border:1px solid #ccc;border-radius:10px;margin:6px 0;background:var(--card);color:var(--text)}
+.row{display:flex;gap:8px}.row>*{flex:1}label{font-size:13px;font-weight:700}.muted{font-size:12px;opacity:.7}
+.price{font-size:22px;font-weight:800;color:var(--navy)}body.dark .price{color:#8ab4ff}
+.steps{display:flex;gap:6px;flex-wrap:wrap}.step{padding:8px 10px;border-radius:20px;background:#e8ecf7;font-size:12px;font-weight:700}.step.on{background:var(--navy);color:#fff}
+#floatBar{position:fixed;left:12px;right:12px;bottom:12px;background:var(--navy);color:#fff;padding:12px;border-radius:12px;display:none;z-index:20;cursor:pointer}
+.hidden{display:none!important}.flav{display:flex;gap:6px;flex-wrap:wrap}.flav button{width:auto;background:#e8ecf7;color:#111}.flav button.on{background:var(--navy);color:#fff}
+</style></head><body>
+<header><div><b>🍽️ FOODFITTI</b><br><span>Savoury Chapati • by Murigi-inc</span></div><button style="width:auto" onclick="toggleDark()">🌙 Dark</button></header>
+<div class="wrap">
+<div class="card"><h2 style="margin:0">Savoury Chapati, made fresh.</h2><p class="muted">Questionnaire-style ordering — answer, pay, track. Athi River free delivery.</p><button onclick="show('order')">Start Order →</button></div>
+
+<div id="order" class="card">
+<h3>1. Choose Your Order</h3>
+<label><input type="radio" name="type" value="place" checked onchange="calc()"> Place Order — 1 to 6 chapatis • KSh 20 each</label><br>
+<label><input type="radio" name="type" value="special" onchange="calc()"> Special Order — 20+ chapatis • KSh 20 each, no max</label><br>
+<label><input type="radio" name="type" value="sweet" onchange="calc()"> Sweetened Chapati • KSh 45 each</label>
+<div id="placeBox"><label>How many? (1-6)</label><input id="qtyPlace" type="number" min="1" max="6" value="2" oninput="calc()"></div>
+<div id="specialBox" class="hidden"><label>How many? (20+)</label><input id="qtySpecial" type="number" min="20" value="20" oninput="calc()"></div>
+<div id="sweetBox" class="hidden"><label>How many sweetened?</label><input id="qtySweet" type="number" min="1" value="1" oninput="calc()"><label>Flavours (tap to add more)</label><div class="flav" id="flavs"></div><p class="muted" id="flavSel">Selected: Plain</p></div>
+<label>Your Name</label><input id="name" placeholder="Full name">
+<label>Phone</label><input id="phone" placeholder="07XX XXX XXX">
+<label>Delivery Area</label><select id="zone" onchange="calc()"><option value="athi">Athi River — FREE</option><option value="kitengela">Kitengela — KSh 150</option><option value="mlolongo">Mlolongo — KSh 100</option><option value="pickup">Pickup — FREE</option></select>
+<label>Exact Location / Estate / House</label><input id="loc" placeholder="Estate, street, house no.">
+<div class="price" id="total">Total: KSh 40</div><p class="muted" id="breakdown"></p>
+</div>
+
+<div class="card"><h3>2. Pay with M-Pesa Pochi</h3>
+<p>Send <b id="payTotal">KSh 40</b> to Pochi: <b id="pochiNo">Loading…</b></p>
+<label>M-Pesa Confirmation Code</label><input id="code1" placeholder="e.g. QK123ABC45">
+<label>Confirm Code Again (type it again)</label><input id="code2" placeholder="Type same code again">
+<label><input type="checkbox" id="terms"> I agree to Foodfitti terms — payment is verified from M-Pesa messages, matching codes alone do not prove payment.</label>
+<button id="submitBtn" onclick="submitOrder()">Place Order via WhatsApp →</button><p class="muted" id="submitMsg"></p></div>
+
+<div class="card"><h3>Track Your Order</h3><label>Order ID or Phone</label><input id="trackInput" placeholder="Order ID"><button onclick="track()">Track Order</button>
+<div id="trackOut" style="margin-top:10px"></div><div class="steps" id="steps"></div></div>
+</div>
+<div id="floatBar" onclick="document.getElementById('trackInput').scrollIntoView({behavior:'smooth'})">📦 <span id="floatTxt">Track your order</span> → Tap to view</div>
+<script>
+let settings={whatsapp:'254700000000',pochi:'0700000000',kitengela:150,mlolongo:100};
+let flavors=['Plain','Cinnamon','Cardamom','Vanilla','Honey','Coconut']; let selFlav=['Plain'];
+let lastHash=''; let currentOrder=null;
+function toggleDark(){document.body.classList.toggle('dark')}
+function show(id){document.getElementById(id).scrollIntoView({behavior:'smooth'})}
+function renderFlavs(){document.getElementById('flavs').innerHTML=flavors.map(f=>`<button type="button" class="${selFlav.includes(f)?'on':''}" onclick="toggleFlav('${f}')">${f}</button>`).join('')}
+function toggleFlav(f){selFlav=selFlav.includes(f)?selFlav.filter(x=>x!==f):[...selFlav,f]; if(!selFlav.length) selFlav=['Plain']; document.getElementById('flavSel').textContent='Selected: '+selFlav.join(', '); renderFlavs()}
+async function api(a,args){try{let r=await fetch('/actions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:a,args:args||{}})}); let j=await r.json(); return j.data||j;}catch(e){return null}}
+async function loadSettings(){let d=await api('records.list',{collection:'foodfitti_settings'}); if(d&&d.records){let r=d.records.find(x=>String(x.id)==='foodfitti-settings-v1')||d.records[0]; if(r&&r.value){settings={...settings,...r.value}; document.getElementById('pochiNo').textContent=settings.pochi||settings.pochiNo||'0700000000';}} calc()}
+function getType(){return document.querySelector('input[name="type"]:checked').value}
+function calc(){let t=getType(); document.getElementById('placeBox').classList.toggle('hidden',t!=='place'); document.getElementById('specialBox').classList.toggle('hidden',t!=='special'); document.getElementById('sweetBox').classList.toggle('hidden',t!=='sweet');
+let qty=t==='place'?+document.getElementById('qtyPlace').value||0:t==='special'?+document.getElementById('qtySpecial').value||0:+document.getElementById('qtySweet').value||0;
+let unit=t==='sweet'?45:20; let sub=qty*unit; let zone=document.getElementById('zone').value; let fee=zone==='kitengela'?(settings.kitengela||150):zone==='mlolongo'?(settings.mlolongo||100):0; let total=sub+fee;
+document.getElementById('total').textContent='Total: KSh '+total; document.getElementById('payTotal').textContent='KSh '+total; document.getElementById('breakdown').textContent=qty+' × KSh '+unit+' = KSh '+sub+' + Delivery KSh '+fee; return {qty,unit,sub,fee,total,zone,t}}
+async function submitOrder(){let c=calc(); let name=document.getElementById('name').value.trim(), phone=document.getElementById('phone').value.trim(), loc=document.getElementById('loc').value.trim(), c1=document.getElementById('code1').value.trim(), c2=document.getElementById('code2').value.trim();
+if(!name||!phone||!loc) return alert('Fill name, phone and location'); if(!c1||c1!==c2) return alert('Codes do not match — type the same M-Pesa code twice'); if(!document.getElementById('terms').checked) return alert('Tick the terms checkbox');
+let orderId='FF'+Date.now().toString().slice(-6); let order={orderId, name, phone, location:loc, type:c.t, qty:c.qty, flavors:c.t==='sweet'?selFlav:[], zone:c.zone, total:c.total, mpesaCode:c1, status:'Preparing', createdAt:new Date().toISOString()};
+document.getElementById('submitBtn').disabled=true; document.getElementById('submitMsg').textContent='Saving…';
+let res=await api('records.create',{collection:'foodfitti_orders', value:order}); if(!res) {document.getElementById('submitMsg').textContent='Saved offline — please WhatsApp us.';}
+currentOrder=order; document.getElementById('trackInput').value=orderId; document.getElementById('submitMsg').textContent='Order '+orderId+' saved! Opening WhatsApp…'; showTrack(order);
+let msg=encodeURIComponent(`Hello Foodfitti! New order ${orderId}\nName: ${name}\nPhone: ${phone}\nLocation: ${loc}\nOrder: ${c.qty} x ${c.t} (${c.t==='sweet'?selFlav.join(', '):''})\nTotal: KSh ${c.total}\nM-Pesa Code: ${c1}\nStatus: Preparing`); window.open(`https://wa.me/${settings.whatsapp}?text=${msg}`,'_blank'); document.getElementById('submitBtn').disabled=false;}
+function showTrack(o){let steps=['Preparing','Packed','On its way','Delivered']; let idx=steps.indexOf(o.status); document.getElementById('trackOut').innerHTML=`<b>Order ${o.orderId}</b> — ${o.qty} x ${o.type} — KSh ${o.total}<br>Status: <b>${o.status}</b>`; document.getElementById('steps').innerHTML=steps.map((s,i)=>`<span class="step ${i<=idx?'on':''}">${s}</span>`).join(''); let fb=document.getElementById('floatBar'); fb.style.display='block'; document.getElementById('floatTxt').textContent=`Order ${o.orderId} — ${o.status}`;}
+async function track(){let q=document.getElementById('trackInput').value.trim(); if(!q) return alert('Enter Order ID'); let d=await api('records.list',{collection:'foodfitti_orders'}); let t=await api('records.list',{collection:'foodfitti_tracking'}); let o=null; if(d&&d.records) o=d.records.map(r=>r.value).find(v=>v.orderId===q||v.phone===q); if(!o) return alert('Order not found'); if(t&&t.records){let tr=t.records.map(r=>r.value).find(v=>v.orderId===o.orderId); if(tr&&tr.status) o={...o,status:tr.status};} currentOrder=o; showTrack(o);}
+async function silentSync(){let d=await api('records.list',{collection:'foodfitti_orders'}); let t=await api('records.list',{collection:'foodfitti_tracking'}); let s=await api('records.list',{collection:'foodfitti_settings'}); let h=JSON.stringify(d)+JSON.stringify(t)+JSON.stringify(s); if(h===lastHash) return; lastHash=h; if(s&&s.records){let r=s.records.find(x=>String(x.id)==='foodfitti-settings-v1')||s.records[0]; if(r&&r.value){settings={...settings,...r.value}; document.getElementById('pochiNo').textContent=settings.pochi||settings.pochiNo||''; calc();}} if(currentOrder&&d&&d.records){let o=d.records.map(r=>r.value).find(v=>v.orderId===currentOrder.orderId); if(o){if(t&&t.records){let tr=t.records.map(r=>r.value).find(v=>v.orderId===o.orderId); if(tr&&tr.status) o={...o,status:tr.status};} currentOrder=o; showTrack(o);}}}
+renderFlavs(); loadSettings(); calc(); setInterval(silentSync,2000);
+</script></body></html>
