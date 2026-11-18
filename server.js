@@ -1,8 +1,5 @@
 // Foodfitti Backend — Render Web Service
 // Keys ONLY in Render env vars. NEVER in HTML.
-// FIX: If Supabase is missing/misconfigured, backend falls back to file+memory storage
-// so passcode / settings / orders NEVER disappear and admin never logs out on refresh.
-// When Supabase IS configured, Supabase is used as the source of truth.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -11,18 +8,15 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/$/, '').replace
 const SUPABASE_KEY = (process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY || '').replace(/["']/g,'').trim();
 const DATA_FILE = path.join(__dirname, 'foodfitti-data.json');
 
-// --- Local fallback store (file + memory) ---
 let memory = {};
 try { if(fs.existsSync(DATA_FILE)){ memory = JSON.parse(fs.readFileSync(DATA_FILE,'utf8')||'{}'); } } catch(e){ memory={}; }
-function saveMemory(){
-  try{ fs.writeFileSync(DATA_FILE, JSON.stringify(memory)); }catch(e){}
-}
+function saveMemory(){ try{ fs.writeFileSync(DATA_FILE, JSON.stringify(memory)); }catch(e){} }
 function memList(col){ return (memory[col]||[]).map(r=>({id:String(r.id), value:r.value})); }
 function memCreate(col, value, id){
   if(!memory[col]) memory[col]=[];
   const rid = id ? String(id) : ('rec_'+Date.now()+'_'+Math.random().toString(36).slice(2,7));
-  const existing = memory[col].find(r=>String(r.id)===rid);
-  if(existing){ existing.value=value; } else { memory[col].push({id:rid, value}); }
+  const ex = memory[col].find(r=>String(r.id)===rid);
+  if(ex){ ex.value=value; } else { memory[col].push({id:rid, value}); }
   saveMemory(); return {id:rid, value};
 }
 function memReplace(col, id, value){
@@ -37,7 +31,6 @@ function memDelete(col, id){
   memory[col]=memory[col].filter(r=>String(r.id)!==String(id));
   saveMemory();
 }
-
 async function supa(table, method, query, body){
   const url = SUPABASE_URL + '/rest/v1/' + table + (query||'');
   const headers={'apikey':SUPABASE_KEY,'Authorization':'Bearer '+SUPABASE_KEY,'Content-Type':'application/json','Prefer':'return=representation'};
@@ -46,9 +39,7 @@ async function supa(table, method, query, body){
 const hasSupa = Boolean(SUPABASE_URL && SUPABASE_KEY);
 
 async function handleRecords(action, args){
-  const col = args.collection;
-  const table = col;
-  // ---- LIST ----
+  const col = args.collection; const table = col;
   if(action==='records.list'){
     if(hasSupa){
       try{
@@ -56,23 +47,16 @@ async function handleRecords(action, args){
         if(res.ok){
           const rows = await res.json();
           const recs = rows.map(r=>({id:String(r.id), value:r.data}));
-          // Mirror to memory so fallback stays in sync
           memory[col]=recs.map(r=>({id:r.id, value:r.value})); saveMemory();
           return {records: recs};
-        } else {
-          const txt = await res.text().catch(()=> '');
-          console.error('Supabase list failed', table, res.status, txt.slice(0,300));
-          // Fall through to memory — don't throw, don't show "Working offline"
         }
-      }catch(e){ console.error('Supabase list error', e.message); }
+      }catch(e){ console.error('list error', e.message); }
     }
     return {records: memList(col)};
   }
-  // ---- CREATE ----
   if(action==='records.create'){
     const value = args.value;
     let recordId = args.id || args.idempotency_key || null;
-    // Special: passcode + settings should have stable ids so they never duplicate / get lost
     if(col==='foodfitti_admin' && value && value.type==='passcode' && !recordId) recordId='admin-passcode-v1';
     if(col==='foodfitti_settings' && !recordId) recordId='foodfitti-settings-v1';
     if(hasSupa){
@@ -85,21 +69,17 @@ async function handleRecords(action, args){
             let res2 = await supa(table,'POST','',{data:value});
             if(res2.ok){ const rows2=await res2.json().catch(()=>[]); const rid=rows2&&rows2[0]?String(rows2[0].id):String(recordId); memReplace(col,rid,value); return {id:rid, value}; }
           }
-          console.error('Supabase create failed', res.status, errText.slice(0,300));
         } else {
-          let res = await supa(table,'POST','',{data:value});
+          let res = await supa(table,'POST','',{data:[STRIPPED]
           if(res.ok){ const rows=await res.json().catch(()=>[]); const rid=rows&&rows[0]?String(rows[0].id):('rec_'+Date.now()); memReplace(col,rid,value); return {id:rid, value}; }
         }
-      }catch(e){ console.error('Supabase create error', e.message); }
+      }catch(e){ console.error('create error', e.message); }
     }
-    // Fallback: memory + file — ALWAYS succeeds
     return memCreate(col, value, recordId);
   }
-  // ---- REPLACE / PUT ----
   if(action==='records.replace' || action==='records.put'){
     const id = args.id ? String(args.id) : (args.idempotency_key ? String(args.idempotency_key) : null);
     const val = args.value;
-    // If no id, use stable id for settings/passcode
     let useId = id;
     if(!useId){
       if(col==='foodfitti_settings') useId='foodfitti-settings-v1';
@@ -112,7 +92,6 @@ async function handleRecords(action, args){
         if(res.ok){
           const rows=await res.json().catch(()=>[]);
           if(rows && rows.length){ memReplace(col,useId,val); return {id:useId, value:val}; }
-          // Not exists -> create
           let res2 = await supa(table,'POST','?on_conflict=id',{id:useId, data:val});
           if(res2.ok){ memReplace(col,useId,val); return {id:useId, value:val}; }
           const t2 = await res2.text().catch(()=> '');
@@ -120,10 +99,8 @@ async function handleRecords(action, args){
             let res3 = await supa(table,'POST','',{data:val});
             if(res3.ok){ const r3=await res3.json().catch(()=>[]); const rid=r3&&r3[0]?String(r3[0].id):useId; memReplace(col,rid,val); return {id:rid, value:val}; }
           }
-        } else {
-          console.error('Supabase replace failed', res.status);
         }
-      }catch(e){ console.error('Supabase replace error', e.message); }
+      }catch(e){ console.error('replace error', e.message); }
     }
     return memReplace(col, useId, val);
   }
@@ -153,26 +130,125 @@ function sendJson(res,status,obj){
   res.writeHead(status,{'Content-Type':'application/json','Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,PATCH,DELETE,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization'});
   res.end(JSON.stringify(obj));
 }
-function sendFile(res,filePath,contentType){
-  fs.readFile(filePath,(err,data)=>{
+
+// --- Serve HTML WITHOUT the old reload script, WITH silent sync (no reload) ---
+const SILENT_SYNC = `
+<script>
+/* Foodfitti Silent Sync — polls every 2s, NEVER reloads. Updates visible status text in place. */
+(function(){
+  var lastHash='';
+  var busy=false;
+  function isTyping(){
+    try{
+      var a=document.activeElement;
+      if(a && (a.tagName==='INPUT'||a.tagName==='TEXTAREA'||a.tagName==='SELECT'||a.isContentEditable)) return true;
+    }catch(e){}
+    return false;
+  }
+  function updateVisibleStatus(latest){
+    try{
+      // Customer Track Order + Admin Orders list: update any visible status text without reload
+      var orders = latest.orders || [];
+      var tracking = latest.tracking || [];
+      orders.forEach(function(o){
+        var v=o.value||{};
+        var id=v.orderId||v.id||o.id;
+        var status=v.status||v.trackingStatus;
+        // Tracking records may hold status
+        tracking.forEach(function(t){
+          var tv=t.value||{};
+          if(tv.orderId===id && tv.status) status=tv.status;
+        });
+        if(!id || !status) return;
+        // Find elements that mention this order id and update nearby status text
+        var all=document.querySelectorAll('div,span,p,td,li');
+        for(var i=0;i<all.length;i++){
+          var el=all[i];
+          if(el.children.length>0) continue;
+          var txt=el.textContent||'';
+          if(txt.indexOf(id)===-1) continue;
+          // If this element itself is a status, replace it
+          if(/Preparing|Packed|On its way|Delivered|Awaiting/i.test(txt) && txt.length<60){
+            el.textContent=status;
+          }
+        }
+      });
+      // Also update any big status heading on Track Order page
+      if(tracking.length){
+        var last=tracking[tracking.length-1];
+        var st=(last.value||{}).status;
+        if(st){
+          var heads=document.querySelectorAll('h1,h2,h3');
+          for(var j=0;j<heads.length;j++){
+            if(/Preparing|Packed|On its way|Delivered/.test(heads[j].textContent||'')){
+              heads[j].textContent=st;
+            }
+          }
+        }
+      }
+      // Let the React app know data changed (if it listens)
+      window.dispatchEvent(new CustomEvent('foodfitti-sync',{detail:latest}));
+    }catch(e){}
+  }
+  async function poll(){
+    if(busy || document.hidden) return;
+    busy=true;
+    try{
+      var out={orders:[],settings:[],tracking:[]};
+      var cols=[['foodfitti_orders','orders'],['foodfitti_settings','settings'],['foodfitti_tracking','tracking']];
+      for(var i=0;i<cols.length;i++){
+        try{
+          var r=await fetch('actions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'records.list',args:{collection:cols[i][0]}})});
+          if(!r.ok) continue;
+          var j=await r.json();
+          out[cols[i][1]]=(j&&j.data&&j.data.records)?j.data.records:[];
+        }catch(e){}
+      }
+      var h=JSON.stringify(out);
+      var hash=0; for(var k=0;k<h.length;k++){hash=((hash<<5)-hash)+h.charCodeAt(k);hash|=0;}
+      var hs=String(hash);
+      if(lastHash===''){ lastHash=hs; }
+      else if(lastHash!==hs){
+        lastHash=hs;
+        // NO reload — just update visible text in place
+        updateVisibleStatus(out);
+      }
+      window.__foodfittiLatest = out;
+    }catch(e){}
+    busy=false;
+  }
+  setTimeout(function(){ poll(); setInterval(poll, 2000); }, 2000);
+})();
+</script>
+`;
+
+function sendHtml(res, filePath){
+  fs.readFile(filePath,'utf8',(err,data)=>{
     if(err){res.writeHead(404,{'Content-Type':'text/plain'});return res.end('Not found');}
-    res.writeHead(200,{'Content-Type':contentType,'Cache-Control':'no-cache'});
-    res.end(data);
+    // 1. Strip ANY old Auto-Sync / reload script
+    let html = data.replace(/<script>[\s\S]*?Auto-Sync[\s\S]*?<\/script>/g, '');
+    html = html.replace(/<script>[\s\S]*?location\.reload\(\)[\s\S]*?<\/script>/g, '');
+    // 2. Inject silent sync (no reload) before </body>
+    if(html.indexOf('Foodfitti Silent Sync')===-1){
+      if(html.indexOf('</body>')!==-1) html = html.replace('</body>', SILENT_SYNC + '\n</body>');
+      else html += SILENT_SYNC;
+    }
+    res.writeHead(200,{'Content-Type':'text/html','Cache-Control':'no-cache'});
+    res.end(html);
   });
 }
 const server=http.createServer(async (req,res)=>{
   if(req.method==='OPTIONS'){ res.writeHead(204,{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Methods':'GET,POST,PATCH,DELETE,OPTIONS','Access-Control-Allow-Headers':'Content-Type,Authorization'}); return res.end(); }
   const urlPath=(req.url||'/').split('?')[0];
   if(urlPath==='/api/health' || urlPath==='/health'){
-    // Test Supabase quickly so you can see WHY it says offline
-    let supaTest = 'not-configured';
+    let supaTest='not-configured';
     if(hasSupa){
       try{
         const r = await supa('foodfitti_admin','GET','?select=id&limit=1');
-        supaTest = r.ok ? 'ok' : ('failed '+r.status+' '+(await r.text().catch(()=> '')).slice(0,200));
+        supaTest = r.ok ? 'ok' : ('failed '+r.status);
       }catch(e){ supaTest='error '+e.message; }
     }
-    return sendJson(res,200,{ok:true, configured:hasSupa, supabase:supaTest, mode: hasSupa && supaTest==='ok' ? 'supabase' : 'fallback-file-memory', time:new Date().toISOString()});
+    return sendJson(res,200,{ok:true,configured:hasSupa,supabase:supaTest,mode:hasSupa&&supaTest==='ok'?'supabase':'fallback-file-memory',time:new Date().toISOString()});
   }
   if(urlPath==='/actions' && req.method==='POST'){
     let raw=''; req.on('data',c=>raw+=c); req.on('end',async()=>{
@@ -185,14 +261,17 @@ const server=http.createServer(async (req,res)=>{
       }catch(e){ console.error('actions error', e && e.message); return sendJson(res,500,{error:e.message||'Backend error'}); }
     }); return;
   }
-  if(urlPath==='/' || urlPath==='/index.html') return sendFile(res, path.join(__dirname,'index.html'),'text/html');
-  if(urlPath==='/admin.html' || urlPath==='/admin') return sendFile(res, path.join(__dirname,'admin.html'),'text/html');
+  if(urlPath==='/' || urlPath==='/index.html') return sendHtml(res, path.join(__dirname,'index.html'));
+  if(urlPath==='/admin.html' || urlPath==='/admin') return sendHtml(res, path.join(__dirname,'admin.html'));
   if(urlPath==='/favicon.ico'){ res.writeHead(204); return res.end(); }
   const safe=path.normalize(path.join(__dirname,'.'+urlPath));
   if(safe.startsWith(__dirname) && fs.existsSync(safe) && fs.statSync(safe).isFile()){
     const ext=path.extname(safe).toLowerCase();
     const types={'.html':'text/html','.css':'text/css','.js':'text/javascript','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.svg':'image/svg+xml'};
-    return sendFile(res,safe,types[ext]||'application/octet-stream');
+    // For any other .html file, also strip reload
+    if(ext==='.html') return sendHtml(res, safe);
+    fs.readFile(safe,(err,data)=>{ if(err){res.writeHead(404);return res.end('Not found');} res.writeHead(200,{'Content-Type':types[ext]||'application/octet-stream'}); res.end(data); });
+    return;
   }
   res.writeHead(404,{'Content-Type':'text/plain'}); res.end('Not found');
 });
