@@ -1,12 +1,12 @@
 services:
-  - type: web
+    - type: web
     name: foodfitti
     env: node
     plan: free
-    buildCommand: ""
+    buildCommand: "npm install"
     startCommand: "node server.js"
     envVars:
-      - key: SUPABASE_URL
+            - key: SUPABASE_URL
         sync: false
-      - key: SUPABASE_ANON_KEY
+            - key: SUPABASE_ANON_KEY
         sync: false
