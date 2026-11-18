@@ -1,8 +1,0 @@
-{
-  "name": "foodfitti-backend",
-  "version": "1.0.0",
-  "description": "Foodfitti real backend — serves customer + admin + Supabase API",
-  "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "engines": { "node": ">=18" }
-}
